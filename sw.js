@@ -1,5 +1,5 @@
 /* Minimal shell cache for Add to Home Screen. No VAPID / no push (plan B). */
-const CACHE = "fombot-desk-v2";
+const CACHE = "fombot-desk-v3";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./chart.js", "./links.js", "./manifest.webmanifest"];
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

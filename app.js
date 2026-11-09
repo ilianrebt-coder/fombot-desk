@@ -233,7 +233,7 @@ function subscribeRealtime() {
   if (MOCK_MODE || !sb) return;
   teardownRealtime();
   const onChange = () => {
-    loadAll().then(render).catch(() => {});
+    loadAll().then(patchUI).catch(() => {});
   };
   for (const table of ["desk_state", "scans", "audits", "verdicts", "activity", "positions", "settings_view", "commands", "balance_points"]) {
     const ch = sb
@@ -243,7 +243,7 @@ function subscribeRealtime() {
     channels.push(ch);
   }
   refetchTimer = setInterval(() => {
-    loadAll().then(render).catch(() => {});
+    loadAll().then(patchUI).catch(() => {});
   }, 15000);
 }
 
@@ -328,7 +328,7 @@ function renderLogin(msg) {
         await loadAll();
         subscribeRealtime();
       } catch (_) {}
-      render();
+      mountShell();
     } catch (err) {
       hint.style.color = "var(--red)";
       hint.textContent = err.message || String(err);
@@ -380,34 +380,34 @@ function renderHome() {
   const acts = (state.activity.length ? state.activity : derivedActivity()).slice(0, 5);
 
   return `
-  <div class="screen active" id="scr-home">
+  <div class="screen" id="scr-home">
     <div class="topnav">
-      <button class="avatar" data-go="account" aria-label="Account">GB</button>
+      <button type="button" class="avatar" data-go="account" aria-label="Account">GB</button>
       <div class="brand">Grok Bot ›</div>
       <input class="search" placeholder="Search mint / name" id="homeSearch" value="${escapeAttr(state.searchQ)}" />
       <div class="bell" aria-label="Notifications">${state.unread ? '<span class="dot"></span>' : ""}🔔</div>
     </div>
-    <div class="balance-row">
-      ${odometerHtml(bal)}
+    <div class="balance-row" id="balanceRow">
+      <span id="balanceOdo">${odometerHtml(bal)}</span>
       ${mode === "PAPER" ? '<span class="pill pill-orange">PAPER</span>' : ""}
     </div>
-    <div><span class="today tabular ${todayPct < 0 ? "neg" : ""}">${pct(todayPct)}</span>
-      <span class="pill pill-green" style="margin-left:8px">${mult.toFixed(2)}×</span></div>
+    <div><span id="todayPct" class="today tabular ${todayPct < 0 ? "neg" : ""}">${pct(todayPct)}</span>
+      <span id="multPill" class="pill pill-green" style="margin-left:8px">${mult.toFixed(2)}×</span></div>
     <div class="chart-wrap"><canvas id="homeChart"></canvas></div>
     <div class="ranges" id="ranges">
-      ${["LIVE", "1H", "4H", "1D", "1W", "ALL"].map((r) => `<button class="${state.chartRange === r ? "active" : ""}" data-range="${r}">${r}</button>`).join("")}
+      ${["LIVE", "1H", "4H", "1D", "1W", "ALL"].map((r) => `<button type="button" class="${state.chartRange === r ? "active" : ""}" data-range="${r}">${r}</button>`).join("")}
     </div>
-    ${state.searchQ ? renderSearchResults() : ""}
+    <div id="searchResults">${state.searchQ ? renderSearchResults() : ""}</div>
     <div class="section-h"><h2>Agents · 5 running</h2></div>
-    <div class="carousel">
+    <div class="carousel" id="homeCarousel">
       ${agentCardScanner(scans)}
       ${agentCardAuditor(auditsPass, auditsFail)}
       ${agentCardAnalyst(lastVerd)}
       ${agentCardExecutor()}
       ${agentCardRisk()}
     </div>
-    <div class="section-h"><h2>Activity</h2><button class="link" data-go="activity">See all</button></div>
-    <div class="activity-preview">${acts.map(activityRow).join("") || emptyAct()}</div>
+    <div class="section-h"><h2>Activity</h2><button type="button" class="link" data-go="activity">See all</button></div>
+    <div class="activity-preview" id="homeActivity">${acts.map(activityRow).join("") || emptyAct()}</div>
   </div>`;
 }
 
@@ -478,7 +478,7 @@ function agentCardAuditor(pass, fail) {
     <h3>Auditor</h3>
     <div class="meta">${pass + fail} taken apart · ${fail} rejected</div>
     <div class="meta">${pass ? "8/8 → Executor" : "waiting"}</div>
-    <button class="btn btn-card" data-open="auditor" data-mint="${state.audits[0]?.mint || ""}" style="margin-top:12px">Open last</button>
+    <button type="button" class="btn btn-card" data-open="auditor" data-mint="${state.audits[0]?.mint || ""}" style="margin-top:12px">Open last</button>
   </div>`;
 }
 function agentCardAnalyst(v) {
@@ -510,7 +510,7 @@ function agentCardRisk() {
 
 function renderAgents() {
   const paused = state.desk?.paused?.agents || {};
-  return `<div class="screen active" id="scr-agents">
+  return `<div class="screen" id="scr-agents">
     <div class="topnav"><div class="brand">Agents</div></div>
     ${AGENTS.map((a) => {
       const hb = state.desk?.heartbeats?.[a] || {};
@@ -535,7 +535,7 @@ function renderAgents() {
         </div>
         <div class="meta" style="color:var(--sec);font-size:12px;margin-bottom:8px">${hb.status || "—"} · ${hb.at || ""}</div>
         ${decisions.map((d) => `<div class="dec"><div class="t"><div class="title">${d.t}</div><div class="sub">${d.s}</div></div></div>`).join("") || "<div class=\"meta\">No decisions yet</div>"}
-        <button class="btn btn-card" data-go="account" style="margin-top:10px">Settings</button>
+        <button type="button" class="btn btn-card" data-go="account" style="margin-top:10px">Settings</button>
       </div>`;
     }).join("")}
     <div class="cmd-result">${state.cmdResult || ""}</div>
@@ -571,7 +571,7 @@ function renderActivity() {
         open: r.kind === "rejected" || r.kind === "sell" ? (r.kind === "rejected" ? "auditor" : "coin") : "coin",
       }))
     : derivedActivity();
-  return `<div class="screen active" id="scr-activity">
+  return `<div class="screen" id="scr-activity">
     <div class="topnav"><div class="brand">Activity</div></div>
     <div class="act-list">${rows.map(activityRow).join("") || emptyAct()}</div>
   </div>`;
@@ -588,7 +588,7 @@ function renderAccount() {
     risk: ["stop_pct", "trail_arm_pct", "trail_pct", "timeout_h", "timeout_min_pct", "risk_poll_s"],
     desk: ["mode", "rpc_url", "fomo_handle"],
   };
-  return `<div class="screen active" id="scr-account">
+  return `<div class="screen" id="scr-account">
     <div class="topnav"><div class="brand">Account</div></div>
     <div class="card-list">
       <div class="item"><span>Mode</span><span class="pill ${mode === "PAPER" ? "pill-orange" : "pill-green"}">${mode}</span></div>
@@ -628,14 +628,14 @@ function renderAuditor(mint) {
     state.audits[0] ||
     null;
   if (!a) {
-    return `<div class="screen active"><button class="back" data-back>‹ Back</button>
+    return `<div class="screen active"><button type="button" class="back" data-back>‹ Back</button>
       <p style="color:var(--sec)">No coin taken apart yet</p></div>`;
   }
   const layers = parseLayers(a.layers);
   const legacy = isLegacyAudit(a);
   const rejected = a.status === "fail";
   return `<div class="screen active" id="scr-auditor">
-    <button class="back" data-back>‹ Back</button>
+    <button type="button" class="back" data-back>‹ Back</button>
     <div class="brand" style="margin-bottom:8px">${shortMint(a.mint)} ${legacy ? '<span class="pill pill-orange" style="font-size:11px;vertical-align:middle">legacy audit</span>' : ""}</div>
     ${legacy ? '<p class="hint" style="margin-top:0">Recorded before the layer-map fix — labels below use the current spec; values are as stored.</p>' : ""}
     <div class="discs" id="discs">
@@ -673,7 +673,7 @@ function renderCoin(mint) {
   const stop = state.settings.stop_pct ?? 6;
   const trail = state.settings.trail_pct ?? 12;
   return `<div class="screen active" id="scr-coin">
-    <button class="back" data-back>‹ Back</button>
+    <button type="button" class="back" data-back>‹ Back</button>
     <div class="topnav" style="padding-top:0">
       <div class="brand">${name}</div>
       ${mode === "PAPER" ? '<span class="pill pill-orange">PAPER</span>' : ""}
@@ -702,52 +702,322 @@ function renderCoin(mint) {
   </div>`;
 }
 
-function render() {
+
+let shellMounted = false;
+let uiWired = false;
+let lastShownBalance = null;
+const scrollPos = { home: 0, agents: 0, activity: 0, account: 0 };
+let beamRanFor = null;
+
+async function insertCommand(kind, payload) {
+  state.cmdResult = "sending…";
+  patchCmdResult();
+  if (MOCK_MODE) {
+    state.cmdResult = `mock ${kind} ok`;
+    if (kind === "pause" || kind === "resume") {
+      const agent = payload.agent;
+      if (state.desk?.paused?.agents) state.desk.paused.agents[agent] = kind === "pause";
+    }
+    patchUI();
+    return;
+  }
+  const { data, error } = await sb
+    .from("commands")
+    .insert({ kind, payload, status: "new" })
+    .select("*")
+    .single();
+  if (error) {
+    state.cmdResult = "error: " + error.message;
+    patchCmdResult();
+    return;
+  }
+  state.cmdResult = "queued #" + data.id;
+  patchCmdResult();
+  const watch = sb
+    .channel("cmd-" + data.id)
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "commands", filter: `id=eq.${data.id}` },
+      (payload) => {
+        const row = payload.new;
+        state.cmdResult = `${row.status}: ${row.result || ""}`;
+        patchCmdResult();
+        sb.removeChannel(watch);
+      }
+    )
+    .subscribe();
+  const t0 = Date.now();
+  const poll = setInterval(async () => {
+    const { data: row } = await sb.from("commands").select("*").eq("id", data.id).maybeSingle();
+    if (row && row.status !== "new") {
+      state.cmdResult = `${row.status}: ${row.result || ""}`;
+      patchCmdResult();
+      clearInterval(poll);
+    }
+    if (Date.now() - t0 > 60000) clearInterval(poll);
+  }, 2000);
+}
+
+function patchCmdResult() {
+  document.querySelectorAll(".cmd-result").forEach((el) => {
+    el.textContent = state.cmdResult || "";
+  });
+}
+
+function homeMetrics() {
+  const d = state.desk || {};
+  const bal = Number(d.balance) || 0;
+  const start = Number(state.nightStart) || bal || 1;
+  const todayPct = ((bal - start) / start) * 100;
+  const mult = bal / start;
+  return { bal, start, todayPct, mult, mode: d.mode || state.settings.mode || "PAPER" };
+}
+
+function mountShell() {
   if (!state.session || !state.owner) {
     if (!MOCK_MODE) {
       renderLogin(state.session && !state.owner ? "Signed in, but not on the owner allowlist." : "");
       return;
     }
   }
-  if (state.sub === "auditor") {
-    tabbar.classList.add("hidden");
-    app.innerHTML = state.loading ? skel() : renderAuditor(state.subMint);
-    afterPaint();
-    wire();
-    runAuditBeam();
+  if (shellMounted && $("#tabs-root")) {
+    syncView();
+    patchUI();
     return;
   }
-  if (state.sub === "coin") {
-    tabbar.classList.add("hidden");
-    app.innerHTML = state.loading ? skel() : renderCoin(state.subMint);
-    afterPaint();
-    wire();
-    return;
+  const scans = state.scans.slice(0, 6);
+  const auditsPass = state.audits.filter((a) => a.status === "pass").length;
+  const auditsFail = state.audits.filter((a) => a.status === "fail").length;
+  // Force builders with fresh state — call existing HTML builders
+  app.innerHTML =
+    `<div id="tabs-root">` +
+    renderHome() +
+    renderAgents() +
+    renderActivity() +
+    renderAccount() +
+    `</div><div id="overlay" hidden></div>`;
+  shellMounted = true;
+  lastShownBalance = null;
+  wireOnce();
+  syncView();
+  afterPaint();
+  // initial odometer mark
+  lastShownBalance = Number(state.desk?.balance) || 0;
+  exposeTestApi();
+}
+
+function syncView() {
+  if (state.sub === "auditor" || state.sub === "coin") {
+    openSub(state.sub, state.subMint, { replayBeam: false });
+  } else {
+    closeSub();
+    showTab(state.tab, { restoreScroll: true });
+  }
+}
+
+function showTab(tab, { restoreScroll = true } = {}) {
+  if (state.tab && state.tab !== tab && !state.sub) {
+    scrollPos[state.tab] = window.scrollY || 0;
+  }
+  state.tab = tab;
+  state.sub = null;
+  const root = $("#tabs-root");
+  const ov = $("#overlay");
+  if (root) root.hidden = false;
+  if (ov) {
+    ov.hidden = true;
+    ov.innerHTML = "";
   }
   tabbar.classList.remove("hidden");
   tabbar.querySelectorAll("button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.tab === state.tab);
+    b.classList.toggle("active", b.dataset.tab === tab);
   });
-  if (state.loading) {
-    app.innerHTML = skel();
+  ["home", "agents", "activity", "account"].forEach((name) => {
+    const el = $("#scr-" + name);
+    if (el) el.classList.toggle("active", name === tab);
+  });
+  if (restoreScroll) {
+    requestAnimationFrame(() => window.scrollTo(0, scrollPos[tab] || 0));
+  }
+  if (tab === "home") afterPaint();
+}
+
+function openSub(kind, mint, { replayBeam = true } = {}) {
+  scrollPos[state.tab] = window.scrollY || 0;
+  state.sub = kind;
+  state.subMint = mint;
+  const root = $("#tabs-root");
+  const ov = $("#overlay");
+  if (!ov) return;
+  if (root) root.hidden = true;
+  tabbar.classList.add("hidden");
+  ov.hidden = false;
+  ov.innerHTML = kind === "auditor" ? renderAuditor(mint) : renderCoin(mint);
+  afterPaint();
+  if (kind === "auditor") {
+    if (replayBeam && beamRanFor !== mint) {
+      beamRanFor = mint;
+      runAuditBeam();
+    } else {
+      finishBeamInstant();
+    }
+  }
+  window.scrollTo(0, 0);
+}
+
+function closeSub() {
+  state.sub = null;
+  const ov = $("#overlay");
+  if (ov) {
+    ov.hidden = true;
+    ov.innerHTML = "";
+  }
+  const root = $("#tabs-root");
+  if (root) root.hidden = false;
+}
+
+function finishBeamInstant() {
+  const discs = [...document.querySelectorAll("#overlay .disc")];
+  if (!discs.length) return;
+  const a = state.audits.find((x) => x.mint === state.subMint) || state.audits[0];
+  const layers = parseLayers(a?.layers);
+  discs.forEach((d) => {
+    const n = +d.dataset.n;
+    const L = layers.find((x) => x.n === n);
+    d.classList.remove("beam");
+    d.classList.add(L?.status === "red" ? "bad" : L?.status === "green" ? "ok" : "");
+    if (L) d.textContent = `L${n} ${LAYER_LABELS[n]}: ${L.status}${L.detail ? " · " + L.detail : ""}`;
+  });
+}
+
+function setChartRange(range) {
+  if (!range || range === state.chartRange) {
+    // still allow redraw
+  }
+  state.chartRange = range;
+  state.chart = chartForRange(range);
+  document.querySelectorAll("[data-range]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.range === range);
+  });
+  redrawHomeChart(true);
+}
+
+function redrawHomeChart(animate) {
+  const hc = $("#homeChart");
+  if (!hc) return;
+  const marks = [];
+  if (!animate || reduceMotion()) {
+    hc.style.opacity = "1";
+    drawHomeLine(hc, state.chart, marks, state.nightStart);
     return;
   }
-  const map = {
-    home: renderHome,
-    agents: renderAgents,
-    activity: renderActivity,
-    account: renderAccount,
-  };
-  app.innerHTML = (map[state.tab] || renderHome)();
-  afterPaint();
-  wire();
+  hc.style.opacity = "0.35";
+  drawHomeLine(hc, state.chart, marks, state.nightStart);
+  requestAnimationFrame(() => {
+    hc.style.opacity = "1";
+  });
+}
+
+function updateBalanceOdo(bal) {
+  const host = $("#balanceOdo");
+  if (!host) return;
+  if (lastShownBalance != null && Number(lastShownBalance) === Number(bal)) {
+    // keep as-is — do not replay animation
+    return;
+  }
+  host.innerHTML = odometerHtml(bal);
+  lastShownBalance = bal;
+}
+
+function patchUI() {
+  if (!shellMounted || !$("#tabs-root")) {
+    mountShell();
+    return;
+  }
+  state.chart = chartForRange(state.chartRange);
+  const { bal, todayPct, mult } = homeMetrics();
+  updateBalanceOdo(bal);
+  const tp = $("#todayPct");
+  if (tp) {
+    tp.textContent = pct(todayPct);
+    tp.classList.toggle("neg", todayPct < 0);
+  }
+  const mp = $("#multPill");
+  if (mp) mp.textContent = `${mult.toFixed(2)}×`;
+
+  const scans = state.scans.slice(0, 6);
+  const auditsPass = state.audits.filter((a) => a.status === "pass").length;
+  const auditsFail = state.audits.filter((a) => a.status === "fail").length;
+  const lastVerd = state.verdicts[0];
+  const carousel = $("#homeCarousel");
+  if (carousel) {
+    carousel.innerHTML =
+      agentCardScanner(scans) +
+      agentCardAuditor(auditsPass, auditsFail) +
+      agentCardAnalyst(lastVerd) +
+      agentCardExecutor() +
+      agentCardRisk();
+  }
+  const acts = (state.activity.length ? state.activity : derivedActivity()).slice(0, 5);
+  const ha = $("#homeActivity");
+  if (ha) ha.innerHTML = acts.map(activityRow).join("") || emptyAct();
+  const sr = $("#searchResults");
+  if (sr) sr.innerHTML = state.searchQ ? renderSearchResults() : "";
+
+  // Rebuild agents / activity / account bodies in place (screen nodes stay)
+  patchScreenBody("scr-agents", renderAgents());
+  patchScreenBody("scr-activity", renderActivity());
+  patchScreenBody("scr-account", renderAccount());
+
+  // Keep active tab class
+  ["home", "agents", "activity", "account"].forEach((name) => {
+    const el = $("#scr-" + name);
+    if (el) el.classList.toggle("active", name === state.tab && !state.sub);
+  });
+
+  if (state.sub) {
+    // refresh overlay content without remounting tabs-root
+    const ov = $("#overlay");
+    if (ov && !ov.hidden) {
+      const y = window.scrollY;
+      ov.innerHTML = state.sub === "auditor" ? renderAuditor(state.subMint) : renderCoin(state.subMint);
+      finishBeamInstant();
+      afterPaint();
+      window.scrollTo(0, y);
+    }
+  } else if (state.tab === "home") {
+    redrawHomeChart(false);
+    const ring = $("#scoreRing");
+    if (ring) {
+      const v = state.verdicts[0];
+      drawScoreRing(ring, v ? (Number(v.score) || 0) * 100 : 0);
+    }
+  } else {
+    afterPaint();
+  }
+  patchCmdResult();
+}
+
+function patchScreenBody(id, html) {
+  const cur = $("#" + id);
+  if (!cur) return;
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html.trim();
+  const next = tmp.firstElementChild;
+  if (!next) return;
+  // keep same element identity for the screen root
+  const wasActive = cur.classList.contains("active");
+  cur.innerHTML = next.innerHTML;
+  cur.className = next.className;
+  if (wasActive) cur.classList.add("active");
+  else cur.classList.remove("active");
 }
 
 function afterPaint() {
   const hc = $("#homeChart");
-  if (hc) {
-    const marks = [];
-    drawHomeLine(hc, state.chart, marks, state.nightStart);
+  if (hc && state.tab === "home" && !state.sub) {
+    drawHomeLine(hc, state.chart, [], state.nightStart);
+    hc.style.opacity = "1";
   }
   const sr = $("#scoreRing");
   if (sr) {
@@ -759,22 +1029,18 @@ function afterPaint() {
 }
 
 function runAuditBeam() {
-  const discs = [...document.querySelectorAll(".disc")];
+  const discs = [...document.querySelectorAll("#overlay .disc, .disc")];
   if (!discs.length) return;
   const a = state.audits.find((x) => x.mint === state.subMint) || state.audits[0];
   const layers = parseLayers(a?.layers);
   if (reduceMotion()) {
-    discs.forEach((d) => {
-      const n = +d.dataset.n;
-      const L = layers.find((x) => x.n === n);
-      d.classList.add(L?.status === "red" ? "bad" : L?.status === "green" ? "ok" : "");
-      if (L) d.textContent = `L${n} ${LAYER_LABELS[n]}: ${L.status}`;
-    });
+    finishBeamInstant();
     return;
   }
   let i = 0;
   const step = () => {
     if (i >= discs.length) return;
+    if (state.sub !== "auditor") return;
     const d = discs[i];
     d.classList.add("beam");
     const n = +d.dataset.n;
@@ -791,97 +1057,123 @@ function runAuditBeam() {
   step();
 }
 
-function wire() {
-  document.querySelectorAll("[data-go]").forEach((el) => {
-    el.onclick = () => {
-      state.tab = el.dataset.go;
-      state.sub = null;
-      render();
-    };
+function wireOnce() {
+  if (uiWired) return;
+  uiWired = true;
+
+  // Tab bar — once
+  tabbar.querySelectorAll("button").forEach((b) => {
+    b.type = "button";
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (state.sub) closeSub();
+      showTab(b.dataset.tab);
+    });
   });
-  document.querySelectorAll("[data-back]").forEach((el) => {
-    el.onclick = () => {
-      state.sub = null;
-      render();
-    };
-  });
-  document.querySelectorAll("[data-open]").forEach((el) => {
-    el.onclick = () => {
-      state.sub = el.dataset.open;
-      state.subMint = el.dataset.mint;
-      render();
-    };
-  });
-  document.querySelectorAll("input[data-agent]").forEach((el) => {
-    el.onchange = () => {
-      const agent = el.dataset.agent;
-      insertCommand(el.checked ? "resume" : "pause", { agent });
-    };
-  });
-  document.querySelectorAll("[data-cmd]").forEach((el) => {
-    el.onclick = () => {
-      const kind = el.dataset.cmd;
-      if (kind === "mode") insertCommand("mode", { mode: el.dataset.mode });
-      else insertCommand(kind, { agent: el.dataset.agent });
-    };
-  });
-  const invite = $("#inviteBtn");
-  if (invite) {
-    invite.onclick = async () => {
-      try {
-        if (navigator.share) await navigator.share({ title: "FOMO", url: SIGNUP_URL });
-        else {
-          await navigator.clipboard.writeText(SIGNUP_URL);
-          state.cmdResult = "Link copied";
-          render();
+
+  // Delegated clicks inside app
+  app.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-range], [data-go], [data-back], [data-open], [data-cmd], #inviteBtn, #signOut");
+    if (!t) return;
+    if (t.tagName === "A" && t.getAttribute("href") === "#") e.preventDefault();
+    if (t.tagName === "BUTTON") e.preventDefault();
+
+    if (t.hasAttribute("data-range")) {
+      setChartRange(t.dataset.range);
+      return;
+    }
+    if (t.hasAttribute("data-go")) {
+      closeSub();
+      showTab(t.dataset.go);
+      return;
+    }
+    if (t.hasAttribute("data-back")) {
+      closeSub();
+      showTab(state.tab);
+      return;
+    }
+    if (t.hasAttribute("data-open")) {
+      openSub(t.dataset.open, t.dataset.mint, { replayBeam: true });
+      return;
+    }
+    if (t.hasAttribute("data-cmd")) {
+      const kind = t.dataset.cmd;
+      if (kind === "mode") insertCommand("mode", { mode: t.dataset.mode });
+      else insertCommand(kind, { agent: t.dataset.agent });
+      return;
+    }
+    if (t.id === "inviteBtn") {
+      (async () => {
+        try {
+          if (navigator.share) await navigator.share({ title: "FOMO", url: SIGNUP_URL });
+          else {
+            await navigator.clipboard.writeText(SIGNUP_URL);
+            state.cmdResult = "Link copied";
+            patchCmdResult();
+          }
+        } catch (_) {
+          try {
+            await navigator.clipboard.writeText(SIGNUP_URL);
+            state.cmdResult = "Link copied";
+            patchCmdResult();
+          } catch (__) {}
         }
-      } catch (_) {
-        await navigator.clipboard.writeText(SIGNUP_URL);
-        state.cmdResult = "Link copied";
-        render();
-      }
-    };
-  }
-  const so = $("#signOut");
-  if (so && !MOCK_MODE) {
-    so.onclick = async () => {
-      await sb.auth.signOut();
-      state.session = null;
-      state.owner = false;
-      teardownRealtime();
-      render();
-    };
-  }
-  const search = $("#homeSearch");
-  if (search) {
-    search.oninput = () => {
-      state.searchQ = search.value || "";
-      // re-render results without losing focus: patch results container if present
-      render();
-      const again = $("#homeSearch");
-      if (again) {
-        again.focus();
-        const v = again.value;
-        again.setSelectionRange(v.length, v.length);
-      }
-    };
-  }
-  document.querySelectorAll("[data-range]").forEach((b) => {
-    b.onclick = () => {
-      state.chartRange = b.dataset.range;
-      state.chart = chartForRange(state.chartRange);
-      render();
-    };
+      })();
+      return;
+    }
+    if (t.id === "signOut" && !MOCK_MODE) {
+      (async () => {
+        await sb.auth.signOut();
+        state.session = null;
+        state.owner = false;
+        shellMounted = false;
+        teardownRealtime();
+        renderLogin("");
+      })();
+    }
+  });
+
+  app.addEventListener("change", (e) => {
+    const el = e.target;
+    if (el && el.matches && el.matches("input[data-agent]")) {
+      insertCommand(el.checked ? "resume" : "pause", { agent: el.dataset.agent });
+    }
+  });
+
+  app.addEventListener("input", (e) => {
+    if (e.target && e.target.id === "homeSearch") {
+      state.searchQ = e.target.value || "";
+      const box = $("#searchResults");
+      if (box) box.innerHTML = state.searchQ ? renderSearchResults() : "";
+    }
   });
 }
 
-tabbar.querySelectorAll("button").forEach((b) => {
-  b.onclick = () => {
-    state.tab = b.dataset.tab;
-    state.sub = null;
-    render();
+function exposeTestApi() {
+  window.__deskTest = {
+    getApp: () => app,
+    getState: () => state,
+    setChartRange,
+    showTab: (tab) => showTab(tab),
+    patchUI,
+    triggerDataBump() {
+      const cur = Number(state.desk?.balance) || 200;
+      state.desk = { ...(state.desk || {}), balance: cur + 1.25 };
+      if (state.balancePoints) {
+        state.balancePoints = state.balancePoints.concat([
+          { t: new Date().toISOString(), v: cur + 1.25 },
+        ]);
+      }
+      state.chart = chartForRange(state.chartRange);
+      patchUI();
+    },
   };
-});
+}
+
+/** @deprecated full rebuild — kept name for any stray calls; routes to mount/patch */
+function render() {
+  mountShell();
+}
 
 async function boot() {
   if ("serviceWorker" in navigator && !MOCK_MODE) {
@@ -890,7 +1182,6 @@ async function boot() {
     } catch (_) {}
   }
   if (MOCK_MODE) {
-    // screenshot helper: ?mock=1&screen=home|agents|activity|account|login|auditor|coin
     state.owner = true;
     state.session = { user: { email: "mock@local" } };
     await loadAll();
@@ -899,18 +1190,22 @@ async function boot() {
       state.session = null;
       state.owner = false;
       renderLogin("");
+      exposeTestApi();
       return;
     }
     if (screen === "auditor") {
+      state.tab = "home";
       state.sub = "auditor";
       state.subMint = state.audits[0]?.mint;
     } else if (screen === "coin") {
+      state.tab = "home";
       state.sub = "coin";
       state.subMint = state.scans.find((s) => s.status === "pass")?.mint || state.scans[0]?.mint;
     } else {
       state.tab = screen;
+      state.sub = null;
     }
-    render();
+    mountShell();
     return;
   }
   sb = initClient();
@@ -929,22 +1224,25 @@ async function boot() {
     await loadAll();
     subscribeRealtime();
   } catch (_) {}
-  render();
+  mountShell();
   sb.auth.onAuthStateChange(async (_e, session) => {
     state.session = session;
     if (!session) {
       state.owner = false;
+      shellMounted = false;
       teardownRealtime();
-      render();
+      renderLogin("");
       return;
     }
     state.owner = await checkOwner(session);
     if (state.owner) {
       await loadAll().catch(() => {});
       subscribeRealtime();
+      mountShell();
+    } else {
+      renderLogin("Signed in, but not on the owner allowlist.");
     }
-    render();
   });
 }
 
-boot();
+window.__deskReady = boot();
