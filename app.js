@@ -258,203 +258,70 @@ function teardownRealtime() {
   refetchTimer = null;
 }
 
-const loginUi = {
-  email: "ilianrebt@gmail.com",
-  step: "email", // email | code
-  err: "",
-  info: "",
-  sending: false,
-  verifying: false,
-  resendAt: 0,
-  resendTimer: null,
-};
-
-async function sendLoginCode(email) {
-  const { error } = await sb.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: true },
-  });
-  if (error) throw error;
-}
-
-async function verifyLoginCode(email, token) {
-  const { data, error } = await sb.auth.verifyOtp({
-    email,
-    token,
-    type: "email",
-  });
+async function signInWithPassword(email, password) {
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) throw error;
   return data;
 }
 
-function clearLoginMsg() {
-  loginUi.err = "";
-  loginUi.info = "";
-}
-
-function startResendCountdown() {
-  loginUi.resendAt = Date.now() + 60000;
-  if (loginUi.resendTimer) clearInterval(loginUi.resendTimer);
-  loginUi.resendTimer = setInterval(() => {
-    if (!document.getElementById("loginForm")) {
-      clearInterval(loginUi.resendTimer);
-      loginUi.resendTimer = null;
-      return;
-    }
-    const left = Math.max(0, Math.ceil((loginUi.resendAt - Date.now()) / 1000));
-    const btn = document.getElementById("resendBtn");
-    if (!btn) return;
-    if (left <= 0) {
-      btn.disabled = false;
-      btn.textContent = "Resend code";
-      clearInterval(loginUi.resendTimer);
-      loginUi.resendTimer = null;
-    } else {
-      btn.disabled = true;
-      btn.textContent = `Resend in ${left}s`;
-    }
-  }, 250);
-}
-
-async function insertCommand(kind, payload) {
-  state.cmdResult = "sending…";
-  render();
-  if (MOCK_MODE) {
-    state.cmdResult = `mock ${kind} ok`;
-    if (kind === "pause" || kind === "resume") {
-      const agent = payload.agent;
-      if (state.desk?.paused?.agents) {
-        state.desk.paused.agents[agent] = kind === "pause";
-      }
-    }
-    render();
-    return;
-  }
-  const { data, error } = await sb
-    .from("commands")
-    .insert({ kind, payload, status: "new" })
-    .select("*")
-    .single();
-  if (error) {
-    state.cmdResult = "error: " + error.message;
-    render();
-    return;
-  }
-  state.cmdResult = "queued #" + data.id;
-  render();
-  // watch for result
-  const watch = sb
-    .channel("cmd-" + data.id)
-    .on(
-      "postgres_changes",
-      { event: "UPDATE", schema: "public", table: "commands", filter: `id=eq.${data.id}` },
-      (payload) => {
-        const row = payload.new;
-        state.cmdResult = `${row.status}: ${row.result || ""}`;
-        render();
-        sb.removeChannel(watch);
-      }
-    )
-    .subscribe();
-  // also poll
-  const t0 = Date.now();
-  const poll = setInterval(async () => {
-    const { data: row } = await sb.from("commands").select("*").eq("id", data.id).maybeSingle();
-    if (row && row.status !== "new") {
-      state.cmdResult = `${row.status}: ${row.result || ""}`;
-      render();
-      clearInterval(poll);
-    }
-    if (Date.now() - t0 > 60000) clearInterval(poll);
-  }, 2000);
-}
-
-/* ---------- Views ---------- */
 function renderLogin(msg) {
   tabbar.classList.add("hidden");
-  if (msg) loginUi.err = msg;
-  const step = loginUi.step;
-  const emailVal = escapeAttr(loginUi.email || "ilianrebt@gmail.com");
-  const resendLeft = Math.max(0, Math.ceil((loginUi.resendAt - Date.now()) / 1000));
-  const canResend = resendLeft <= 0;
+  const emailVal = escapeAttr("ilianrebt@gmail.com");
   app.innerHTML = `
     <div class="login-wrap">
       <h1>Grok Bot</h1>
-      <p>Private trading desk. Sign in with a one-time code sent to the owner email — works in the home-screen app.</p>
+      <p>Private trading desk. Sign in with the owner email and password.</p>
       <form id="loginForm">
-        <input class="field" type="email" name="email" id="loginEmail" value="${emailVal}" placeholder="you@email.com" required autocomplete="email" ${step === "code" ? "readonly" : ""} />
-        ${
-          step === "code"
-            ? `<input class="field" type="text" name="token" id="loginCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code" required />
-               <button class="btn btn-primary" type="submit" id="verifyBtn"${loginUi.verifying ? " disabled" : ""}>${loginUi.verifying ? "Checking…" : "Verify code"}</button>
-               <button class="btn" type="button" id="resendBtn" style="margin-top:10px;background:var(--card2);color:#fff"${canResend && !loginUi.sending ? "" : " disabled"}>${canResend ? "Resend code" : `Resend in ${resendLeft}s`}</button>
-               <button class="btn" type="button" id="changeEmailBtn" style="margin-top:10px;background:transparent;color:var(--sec)">Use a different email</button>`
-            : `<button class="btn btn-primary" type="submit" id="sendBtn"${loginUi.sending ? " disabled" : ""}>${loginUi.sending ? "Sending…" : "Send code"}</button>`
-        }
+        <input class="field" type="email" name="email" id="loginEmail" value="${emailVal}" placeholder="you@email.com" required autocomplete="username" />
+        <input class="field" type="password" name="password" id="loginPassword" placeholder="Password" required autocomplete="current-password" />
+        <button class="btn btn-primary" type="submit" id="loginBtn">Entra</button>
       </form>
-      <p class="hint" id="loginHint" style="${loginUi.err ? "color:var(--red)" : ""}">${escapeAttr(loginUi.err || loginUi.info || "")}</p>
+      <p class="hint" id="loginHint" style="${msg ? "color:var(--red)" : ""}">${escapeAttr(msg || "")}</p>
     </div>`;
-
   const form = $("#loginForm");
+  const hint = $("#loginHint");
   form.onsubmit = async (e) => {
     e.preventDefault();
-    clearLoginMsg();
+    hint.style.color = "var(--ter)";
+    hint.textContent = "";
     const fd = new FormData(form);
     const email = String(fd.get("email") || "").trim().toLowerCase();
-    loginUi.email = email;
-    if (loginUi.step === "email") {
-      loginUi.sending = true;
-      renderLogin("");
-      try {
-        if (MOCK_MODE) {
-          // screenshot / offline
-        } else {
-          await sendLoginCode(email);
-        }
-        loginUi.step = "code";
-        loginUi.info = "Code sent — check your inbox (and spam).";
-        loginUi.sending = false;
-        startResendCountdown();
-        renderLogin("");
-        const code = $("#loginCode");
-        if (code) code.focus();
-      } catch (err) {
-        loginUi.sending = false;
-        loginUi.err = err.message || String(err);
-        renderLogin("");
-      }
-      return;
+    const password = String(fd.get("password") || "");
+    const btn = $("#loginBtn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "…";
     }
-    // verify
-    const token = String(fd.get("token") || "").replace(/\s+/g, "");
-    if (!/^\d{6}$/.test(token)) {
-      loginUi.err = "Enter the 6-digit code from the email.";
-      renderLogin("");
-      return;
-    }
-    loginUi.verifying = true;
-    renderLogin("");
     try {
       if (MOCK_MODE) {
-        loginUi.verifying = false;
-        loginUi.err = "Mock mode — OTP not verified.";
-        renderLogin("");
+        hint.style.color = "var(--ter)";
+        hint.textContent = "Mock mode — password login UI only.";
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Entra";
+        }
         return;
       }
-      await verifyLoginCode(email, token);
-      loginUi.verifying = false;
-      // session lands via onAuthStateChange / getSession
+      await signInWithPassword(email, password);
       const { data } = await sb.auth.getSession();
       state.session = data.session;
       if (!state.session) {
-        loginUi.err = "Code accepted but no session — try again.";
-        renderLogin("");
+        hint.style.color = "var(--red)";
+        hint.textContent = "Signed in but no session — try again.";
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Entra";
+        }
         return;
       }
       state.owner = await checkOwner(state.session);
       if (!state.owner) {
-        loginUi.step = "email";
-        renderLogin("Signed in, but not on the owner allowlist.");
+        hint.style.color = "var(--red)";
+        hint.textContent = "Signed in, but not on the owner allowlist.";
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "Entra";
+        }
         return;
       }
       try {
@@ -463,43 +330,14 @@ function renderLogin(msg) {
       } catch (_) {}
       render();
     } catch (err) {
-      loginUi.verifying = false;
-      loginUi.err = err.message || String(err);
-      renderLogin("");
+      hint.style.color = "var(--red)";
+      hint.textContent = err.message || String(err);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "Entra";
+      }
     }
   };
-
-  const resend = $("#resendBtn");
-  if (resend) {
-    resend.onclick = async () => {
-      if (Date.now() < loginUi.resendAt) return;
-      clearLoginMsg();
-      loginUi.sending = true;
-      renderLogin("");
-      try {
-        if (!MOCK_MODE) await sendLoginCode(loginUi.email);
-        loginUi.info = "Code resent.";
-        loginUi.sending = false;
-        startResendCountdown();
-        renderLogin("");
-      } catch (err) {
-        loginUi.sending = false;
-        loginUi.err = err.message || String(err);
-        renderLogin("");
-      }
-    };
-  }
-  const change = $("#changeEmailBtn");
-  if (change) {
-    change.onclick = () => {
-      clearLoginMsg();
-      loginUi.step = "email";
-      if (loginUi.resendTimer) clearInterval(loginUi.resendTimer);
-      loginUi.resendTimer = null;
-      loginUi.resendAt = 0;
-      renderLogin("");
-    };
-  }
 }
 
 function skel() {
@@ -1060,13 +898,7 @@ async function boot() {
     if (screen === "login") {
       state.session = null;
       state.owner = false;
-      loginUi.step = "code";
-      loginUi.email = "ilianrebt@gmail.com";
-      loginUi.info = "Code sent — check your inbox (and spam).";
-      loginUi.err = "";
-      loginUi.resendAt = Date.now() + 60000;
       renderLogin("");
-      startResendCountdown();
       return;
     }
     if (screen === "auditor") {
