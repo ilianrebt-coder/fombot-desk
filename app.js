@@ -258,12 +258,62 @@ function teardownRealtime() {
   refetchTimer = null;
 }
 
-async function sendMagicLink(email) {
+const loginUi = {
+  email: "ilianrebt@gmail.com",
+  step: "email", // email | code
+  err: "",
+  info: "",
+  sending: false,
+  verifying: false,
+  resendAt: 0,
+  resendTimer: null,
+};
+
+async function sendLoginCode(email) {
   const { error } = await sb.auth.signInWithOtp({
     email,
-    options: { emailRedirectTo: REDIRECT },
+    options: { shouldCreateUser: true },
   });
   if (error) throw error;
+}
+
+async function verifyLoginCode(email, token) {
+  const { data, error } = await sb.auth.verifyOtp({
+    email,
+    token,
+    type: "email",
+  });
+  if (error) throw error;
+  return data;
+}
+
+function clearLoginMsg() {
+  loginUi.err = "";
+  loginUi.info = "";
+}
+
+function startResendCountdown() {
+  loginUi.resendAt = Date.now() + 60000;
+  if (loginUi.resendTimer) clearInterval(loginUi.resendTimer);
+  loginUi.resendTimer = setInterval(() => {
+    if (!document.getElementById("loginForm")) {
+      clearInterval(loginUi.resendTimer);
+      loginUi.resendTimer = null;
+      return;
+    }
+    const left = Math.max(0, Math.ceil((loginUi.resendAt - Date.now()) / 1000));
+    const btn = document.getElementById("resendBtn");
+    if (!btn) return;
+    if (left <= 0) {
+      btn.disabled = false;
+      btn.textContent = "Resend code";
+      clearInterval(loginUi.resendTimer);
+      loginUi.resendTimer = null;
+    } else {
+      btn.disabled = true;
+      btn.textContent = `Resend in ${left}s`;
+    }
+  }, 250);
 }
 
 async function insertCommand(kind, payload) {
@@ -322,26 +372,134 @@ async function insertCommand(kind, payload) {
 /* ---------- Views ---------- */
 function renderLogin(msg) {
   tabbar.classList.add("hidden");
+  if (msg) loginUi.err = msg;
+  const step = loginUi.step;
+  const emailVal = escapeAttr(loginUi.email || "ilianrebt@gmail.com");
+  const resendLeft = Math.max(0, Math.ceil((loginUi.resendAt - Date.now()) / 1000));
+  const canResend = resendLeft <= 0;
   app.innerHTML = `
     <div class="login-wrap">
       <h1>Grok Bot</h1>
-      <p>Private trading desk. Sign in with the owner email. Magic link opens this app.</p>
+      <p>Private trading desk. Sign in with a one-time code sent to the owner email — works in the home-screen app.</p>
       <form id="loginForm">
-        <input class="field" type="email" name="email" placeholder="you@email.com" required autocomplete="email" />
-        <button class="btn btn-primary" type="submit">Send magic link</button>
+        <input class="field" type="email" name="email" id="loginEmail" value="${emailVal}" placeholder="you@email.com" required autocomplete="email" ${step === "code" ? "readonly" : ""} />
+        ${
+          step === "code"
+            ? `<input class="field" type="text" name="token" id="loginCode" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="6-digit code" required />
+               <button class="btn btn-primary" type="submit" id="verifyBtn"${loginUi.verifying ? " disabled" : ""}>${loginUi.verifying ? "Checking…" : "Verify code"}</button>
+               <button class="btn" type="button" id="resendBtn" style="margin-top:10px;background:var(--card2);color:#fff"${canResend && !loginUi.sending ? "" : " disabled"}>${canResend ? "Resend code" : `Resend in ${resendLeft}s`}</button>
+               <button class="btn" type="button" id="changeEmailBtn" style="margin-top:10px;background:transparent;color:var(--sec)">Use a different email</button>`
+            : `<button class="btn btn-primary" type="submit" id="sendBtn"${loginUi.sending ? " disabled" : ""}>${loginUi.sending ? "Sending…" : "Send code"}</button>`
+        }
       </form>
-      <p class="hint" id="loginHint">${msg || ""}</p>
+      <p class="hint" id="loginHint" style="${loginUi.err ? "color:var(--red)" : ""}">${escapeAttr(loginUi.err || loginUi.info || "")}</p>
     </div>`;
-  $("#loginForm").onsubmit = async (e) => {
+
+  const form = $("#loginForm");
+  form.onsubmit = async (e) => {
     e.preventDefault();
-    const email = new FormData(e.target).get("email");
+    clearLoginMsg();
+    const fd = new FormData(form);
+    const email = String(fd.get("email") || "").trim().toLowerCase();
+    loginUi.email = email;
+    if (loginUi.step === "email") {
+      loginUi.sending = true;
+      renderLogin("");
+      try {
+        if (MOCK_MODE) {
+          // screenshot / offline
+        } else {
+          await sendLoginCode(email);
+        }
+        loginUi.step = "code";
+        loginUi.info = "Code sent — check your inbox (and spam).";
+        loginUi.sending = false;
+        startResendCountdown();
+        renderLogin("");
+        const code = $("#loginCode");
+        if (code) code.focus();
+      } catch (err) {
+        loginUi.sending = false;
+        loginUi.err = err.message || String(err);
+        renderLogin("");
+      }
+      return;
+    }
+    // verify
+    const token = String(fd.get("token") || "").replace(/\s+/g, "");
+    if (!/^\d{6}$/.test(token)) {
+      loginUi.err = "Enter the 6-digit code from the email.";
+      renderLogin("");
+      return;
+    }
+    loginUi.verifying = true;
+    renderLogin("");
     try {
-      await sendMagicLink(String(email));
-      $("#loginHint").textContent = "Check your inbox for the magic link.";
+      if (MOCK_MODE) {
+        loginUi.verifying = false;
+        loginUi.err = "Mock mode — OTP not verified.";
+        renderLogin("");
+        return;
+      }
+      await verifyLoginCode(email, token);
+      loginUi.verifying = false;
+      // session lands via onAuthStateChange / getSession
+      const { data } = await sb.auth.getSession();
+      state.session = data.session;
+      if (!state.session) {
+        loginUi.err = "Code accepted but no session — try again.";
+        renderLogin("");
+        return;
+      }
+      state.owner = await checkOwner(state.session);
+      if (!state.owner) {
+        loginUi.step = "email";
+        renderLogin("Signed in, but not on the owner allowlist.");
+        return;
+      }
+      try {
+        await loadAll();
+        subscribeRealtime();
+      } catch (_) {}
+      render();
     } catch (err) {
-      $("#loginHint").textContent = err.message || String(err);
+      loginUi.verifying = false;
+      loginUi.err = err.message || String(err);
+      renderLogin("");
     }
   };
+
+  const resend = $("#resendBtn");
+  if (resend) {
+    resend.onclick = async () => {
+      if (Date.now() < loginUi.resendAt) return;
+      clearLoginMsg();
+      loginUi.sending = true;
+      renderLogin("");
+      try {
+        if (!MOCK_MODE) await sendLoginCode(loginUi.email);
+        loginUi.info = "Code resent.";
+        loginUi.sending = false;
+        startResendCountdown();
+        renderLogin("");
+      } catch (err) {
+        loginUi.sending = false;
+        loginUi.err = err.message || String(err);
+        renderLogin("");
+      }
+    };
+  }
+  const change = $("#changeEmailBtn");
+  if (change) {
+    change.onclick = () => {
+      clearLoginMsg();
+      loginUi.step = "email";
+      if (loginUi.resendTimer) clearInterval(loginUi.resendTimer);
+      loginUi.resendTimer = null;
+      loginUi.resendAt = 0;
+      renderLogin("");
+    };
+  }
 }
 
 function skel() {
@@ -902,7 +1060,13 @@ async function boot() {
     if (screen === "login") {
       state.session = null;
       state.owner = false;
+      loginUi.step = "code";
+      loginUi.email = "ilianrebt@gmail.com";
+      loginUi.info = "Code sent — check your inbox (and spam).";
+      loginUi.err = "";
+      loginUi.resendAt = Date.now() + 60000;
       renderLogin("");
+      startResendCountdown();
       return;
     }
     if (screen === "auditor") {
