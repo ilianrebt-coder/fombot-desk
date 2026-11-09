@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#000000" />
+  <title>Grok Bot</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.1/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+  <div id="err" class="err-banner hidden"></div>
+  <div id="app"></div>
+  <nav id="tabbar" class="tabbar hidden" aria-label="Main">
+    <button data-tab="home" class="active"><span class="ico">⌂</span>Home</button>
+    <button data-tab="agents"><span class="ico">◎</span>Agents</button>
+    <button data-tab="activity"><span class="ico">☰</span>Activity</button>
+    <button data-tab="account"><span class="ico">☺</span>Account</button>
+  </nav>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
